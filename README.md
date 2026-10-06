@@ -1,122 +1,97 @@
-# aws-elasticbeanstalk
-poc project to validade eb-environment
+# Study Sync
 
+Aplicação de perguntas sobre AWS usada como prova de conceito com Node.js, PostgreSQL e AWS Elastic Beanstalk. O navegador mostra uma pergunta por vez; as respostas e a pontuação são armazenadas no PostgreSQL.
 
-### Install Deps
+> **Escopo:** todos os visitantes compartilham as mesmas respostas e a mesma pontuação. Os endpoints não têm autenticação. Use este projeto como demonstração, não como um quiz público com dados individuais.
 
-```sh
-npm install
-```
+## Requisitos
 
-### Start Server
+- Node.js e npm
+- Docker com Docker Compose, para executar o PostgreSQL localmente
+- EB CLI e uma conta AWS configurada, apenas se quiser experimentar um deploy
 
+## Executar localmente
 
-```sh
-DATABASE_URL="postgresql://postgres:password@localhost:5432/study-sync" PORT=4567 npm start
-```
+1. Inicie o banco:
 
-# Run Postgres Server
+   ```sh
+   docker compose up -d db
+   ```
 
-```sh
-docker compose up
-```
+   Aguarde o PostgreSQL ficar pronto antes de seguir. Você pode conferir com `docker compose exec -T db pg_isready -U postgres`.
 
-## Install Postgres Client
+2. Crie o banco `study-sync` e carregue o esquema e as perguntas de exemplo:
 
-```
-sudo apt install postgresql-client
-```
+   ```sh
+   docker compose exec -T db psql -U postgres -d postgres -c 'CREATE DATABASE "study-sync";'
+   docker compose exec -T db psql -U postgres -d study-sync < src/sql/schema.sql
+   docker compose exec -T db psql -U postgres -d study-sync < src/sql/seed.sql
+   ```
 
-## Create initial database
-```sh
-createdb study-sync -h localhost -U postgres
-```
+   Execute esses comandos apenas na primeira configuração. **`schema.sql` remove e recria as tabelas `answers` e `questions`**, apagando os dados existentes. Se o banco já existir, pule o primeiro comando.
 
-## Connect to Postgres Client
-```sh
-psql postgresql://postgres:password@localhost:5432/study-sync
-```
+3. Instale as dependências e inicie a aplicação:
 
-## Create Schema
-psql study-sync < src/sql/schema.sql -h localhost -U postgres
+   ```sh
+   npm ci
+   DATABASE_URL='postgresql://postgres:password@localhost:5432/study-sync' PORT=4567 npm start
+   ```
 
-## Import seed Data
-psql study-sync < src/sql/seed.sql -h localhost -U postgres
+4. Abra `http://localhost:4567`.
 
-## Verify Data
-```sh
-psql postgresql://postgres:password@localhost:5432/study-sync
-```
+O `npm start` usa `DATABASE_URL` para conectar ao PostgreSQL e `PORT` para a porta HTTP. Sem `PORT`, a aplicação usa `3000`. A senha `password` em `docker-compose.yml` serve somente para desenvolvimento local; configure outra credencial e restrinja o acesso ao banco em qualquer ambiente compartilhado.
 
-```sql
-SELECT * FROM questions;
-```
-
-## Install EB CLI
-
-> EB at the the time of this example only works in 3.11 and not 3.12, so we had to install python 3.11 and create a virtualenv
+Para parar o banco local sem apagar seus dados:
 
 ```sh
-brew install python@3.11
+docker compose down
 ```
+
+## Testes
 
 ```sh
-pip install virtualenv
-virtualenv -p python3.11 ~/myenv
-source ~/myenv/bin/activate
-python --version
-pip install awsebcli --upgrade
+npm test
 ```
 
-## Manual Install if you don't have to do the virtual enviroment (optional)
-```sh
-git clone https://github.com/aws/aws-elastic-beanstalk-cli-setup.git
-python ./aws-elastic-beanstalk-cli-setup/scripts/ebcli_installer.py
-echo 'export PATH="/home/gitpod/.ebcli-virtual-env/executables:$PATH"' >> ~/.bash_profile && source ~/.bash_profile
-```
+Os testes cobrem os arquivos públicos, o fluxo de perguntas, envio e reset, além da validação de entradas inválidas. Eles simulam o acesso ao banco e às rotas; não substituem um teste de integração com PostgreSQL e HTTP reais.
 
-## Initialize EB
+## API
 
-```
-eb init
-```
+| Método | Caminho | Função |
+| --- | --- | --- |
+| `GET` | `/questions` | Retorna as perguntas, a próxima pergunta e a pontuação compartilhada. |
+| `PUT` | `/submit` | Registra uma resposta. Recebe JSON com `question_uuid` e `choice` (`A`, `B`, `C` ou `D`). |
+| `PUT` | `/reset` | Apaga todas as respostas registradas. |
 
-
-## Set Codesource
+Exemplo de envio, usando o `question_index` retornado por `GET /questions`:
 
 ```sh
-eb codesource
+curl -X PUT http://localhost:4567/submit \
+  -H 'Content-Type: application/json' \
+  -d '{"question_uuid":"UUID_DA_PERGUNTA","choice":"B"}'
 ```
 
-## Zip Directory
+## Estrutura do projeto
 
-```sh
-zip -r app.zip app
-```
+| Caminho | Responsabilidade |
+| --- | --- |
+| `src/server/index.js` | Lê a configuração, conecta ao banco e inicia o servidor. |
+| `src/server/app.js` | Monta o Express e entrega os arquivos da interface. |
+| `src/server/quiz/routes.js` | Define as rotas HTTP e valida as respostas. |
+| `src/server/quiz/service.js` | Coordena o fluxo do quiz e calcula se a resposta está correta. |
+| `src/server/quiz/repository.js` | Executa as consultas do quiz no PostgreSQL. |
+| `src/public/` | HTML, CSS e JavaScript executados no navegador. |
+| `src/sql/schema.sql`, `seed.sql` | Esquema e perguntas de exemplo. |
+| `test/service.test.js` | Testes dos fluxos do quiz com dependências simuladas. |
 
-# Unzip Directory
+As rotas chamam o serviço, que usa o repositório para acessar os dados. A interface usa somente a API HTTP. Isso permite testar as regras sem iniciar o banco ou o servidor real.
 
-```sh
- unzip app.zip 
-```
+## Elastic Beanstalk
 
-## Make Config Var for Eb Extensions
+Este repositório contém o código da aplicação, mas não provisiona RDS, rede, políticas IAM ou segredos. Para experimentar um deploy:
 
-mkdir .ebextensions
-touch .ebextensions/001_envar.config
+1. Configure uma instância PostgreSQL acessível **somente** às instâncias da aplicação e carregue `src/sql/schema.sql` e `src/sql/seed.sql` nesse banco. Não execute novamente `schema.sql` depois que houver dados a preservar.
+2. Defina `DATABASE_URL` no ambiente do Elastic Beanstalk, preferencialmente a partir do AWS Secrets Manager ou Systems Manager Parameter Store. Não grave a URL com senha no repositório. O aplicativo lê `PORT` da plataforma automaticamente.
+3. Inicialize o projeto com `eb init`, crie um ambiente Node.js com `eb create` e publique as alterações com `eb deploy`. Configure o banco e `DATABASE_URL` como parte da criação do ambiente; sem a variável, o servidor não inicia.
 
-## Create IAM Profile
-
-
-```sh
-aws iam create-instance-profile --instance-profile-name StudySyncInstanceProfile
-aws iam add-role-to-instance-profile \
-    --role-name AWSElasticBeanstalkWebTierRole  \
-    --instance-profile-name StudySyncInstanceProfile
-```
-
-## Importing into RDS
-
-
-psql mydatabase < sql/schema.sql -h rds-basic-rdsinstance-uzdzjcuz1opq.cv1x0r3utzcm.ca-central-1.rds.amazonaws.com -U postgres 
-psql mydatabase < sql/seed.sql -h rds-basic-rdsinstance-uzdzjcuz1opq.cv1x0r3utzcm.ca-central-1.rds.amazonaws.com -U postgres 
+O Elastic Beanstalk usa `npm start` quando encontra `package.json` sem `Procfile`. Consulte a documentação da AWS para [plataforma Node.js](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/create_deploy_nodejs.container.html), [EB CLI](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/eb-cli3.html) e [segredos em variáveis de ambiente](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/AWSHowTo.secrets.env-vars.html).

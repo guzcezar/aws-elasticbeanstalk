@@ -13,6 +13,12 @@ var Data = {
     return question;
   },
   question_index: null,
+  applyProgress: function(data){
+    Data.score = parseInt(data.score, 10)
+    Data.answers_total = parseInt(data.answers_total, 10)
+    Data.question_index = data.question_index
+    Data.selected = null
+  },
   questions: {
     list: [],
     fetch:  function(){
@@ -21,10 +27,8 @@ var Data = {
         url: "/questions"
       })
       .then(function(data) {
-        Data.score = parseInt(data.score)
-        Data.answers_total = parseInt(data.answers_total)
+        Data.applyProgress(data)
         Data.questions.list = data.questions
-        Data.question_index = data.question_index
       })
     }
   }
@@ -75,14 +79,11 @@ var App = {
       url: "/reset"
     })
     .then(function(data) {
-      console.log('data',data)
-      Data.score = parseInt(data.score)
-      Data.answers_total = parseInt(data.answers_total)
-      Data.question_index = data.question_index
-      Data.selected = null;
+      Data.applyProgress(data)
     })
   },
   submit: function(){
+    if (Data.selected === null || Data.question_index === null) return
     m.request({
       method: "PUT",
       url: "/submit",
@@ -92,11 +93,7 @@ var App = {
       },
     })
     .then(function(data) {
-      console.log('data',data)
-      Data.score = parseInt(data.score)
-      Data.answers_total = parseInt(data.answers_total)
-      Data.question_index = data.question_index
-      Data.selected = null;
+      Data.applyProgress(data)
     })
   },
   view: function() {
@@ -106,7 +103,7 @@ var App = {
         m('h2',`Question ${Data.answers_total+1}:`),
         m(Question),
         m('.submit',
-          m("button.submit", {onclick: App.submit}, 'Submit')
+          m("button.submit", {onclick: App.submit, disabled: Data.selected === null || Data.question_index === null}, 'Submit')
         )
       ),
       m(".progress",

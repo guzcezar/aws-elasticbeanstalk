@@ -2,14 +2,13 @@
     "name": "app",
     "version": "1.0.0",
     "description": "",
-    "main": "index.js",
     "dependencies": {
       "express": "^4.17.1",
       "pg": "^8.11.5"
     },
     "scripts": {
-      "start": "DATABASE_URL=postgresql://postgres:password@localhost:5432/study-sync PORT=4567 node src/app/index.js",
-      "test": "echo \"Error: no test specified\" && exit 1"
+      "start": "node src/server/index.js",
+      "test": "node --test"
     },
     "keywords": [],
     "author": "",
